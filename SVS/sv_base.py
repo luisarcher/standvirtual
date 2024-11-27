@@ -9,6 +9,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from dictionary import brand_urls
 import random
+import re
 
 # Setup ChromeDriver options
 options = Options()
@@ -26,6 +27,20 @@ currentDate = datetime.now().strftime("%Y-%m-%d")
 # Define the CSV file name
 csvFile = f"standvirtual_scraper_{currentDate}.csv"
 
+# CONSTS
+CLASS_DICT = {
+    "num_cars" : "e17gkxda2 ooa-17owgto er34gjf0",
+    "car_title": "ooa-1qo9a0p epwfahw6",
+    "car_info": "ooa-d3dp2q epwfahw2",
+
+    "brand": "efpuxbr9 ooa-1ed90th er34gjf0",
+    "kilometer": {"data-parameter": "mileage"},
+    "gasType": {"data-parameter": "fuel_type"},
+    "gearBox": {"data-parameter": "gearbox"},
+    "year": {"data-parameter": "first_registration_year"},
+    "price": "ooa-2p9dfw efpuxbr4"
+}
+
 # Open the CSV file in write mode to create it fresh
 with open(csvFile, mode='w', newline='', encoding='utf-8-sig') as file:
     # Create a CSV DictWriter object with the specified column order
@@ -39,13 +54,13 @@ with open(csvFile, mode='w', newline='', encoding='utf-8-sig') as file:
     time.sleep(random.uniform(3,7))  # Allow the page to load
 
     # Handle "Accept Cookies" prompt
-    # try:
-    #     WebDriverWait(driver, 10).until(
-    #         EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Aceito')]"))
-    #     ).click()
-    #     print("Accepted cookies.")
-    # except Exception as e:
-    #     print(f"No cookie consent prompt found or error clicking it: {e}")
+    try:
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Aceito')]"))
+        ).click()
+        print("Accepted cookies.")
+    except Exception as e:
+        print(f"No cookie consent prompt found or error clicking it: {e}")
 
     # Loop through each brand from the dictionary
     for brand, slug in brand_urls.items():
@@ -65,8 +80,11 @@ with open(csvFile, mode='w', newline='', encoding='utf-8-sig') as file:
 
             print(f"Scraping {driver.current_url} for {brand}...")
 
+            totalCarsforBrand_el = soup.find("p", class_=CLASS_DICT["num_cars"])
+            print(f'Total cars for {brand}: {totalCarsforBrand_el.b.contents[0]}')
+
             # Find all articles containing car information
-            insideArticles = soup.find_all("article", class_="ooa-yca59n efpuxbr0")
+            insideArticles = soup.find_all("section", class_="ooa-qat6iw epwfahw1")
 
             # Check if there are any listings
             if not insideArticles:
@@ -76,35 +94,59 @@ with open(csvFile, mode='w', newline='', encoding='utf-8-sig') as file:
             # Loop through each article (car listing)
             for article in insideArticles:
                 try:
-                    # Use checks to ensure elements exist before accessing their text
-                    title = article.find("h1", class_="efpuxbr9 ooa-1ed90th er34gjf0")
-                    title = title.text if title else "N/A"  # Set "N/A" if not found
 
-                    kilometer = article.find("dd", {"data-parameter": "mileage"})
-                    kilometer = kilometer.text.replace(" km", "").replace(" ","") if kilometer else "1"
+                    # TODO: Find a way to create a dict of callables, so that each value will run a set of instructions
+                    def generate_car_data_dict(brand: str, article):
+                        car_data_dict = {}
 
-                    gasType = article.find("dd", {"data-parameter": "fuel_type"})
-                    gasType = gasType.text if gasType else "N/A"
+                        car_data_dict["brand"] = brand
 
-                    gearBox = article.find("dd", {"data-parameter": "gearbox"})
-                    gearBox = gearBox.text if gearBox else "N/A"
+                        car_title_section = article.find("div", class_=CLASS_DICT["car_title"])
 
-                    year = article.find("dd", {"data-parameter": "first_registration_year"})
-                    year = year.text if year else "N/A"
+                        # Find the ad title
+                        try:
+                            car_data_dict["title"] = car_title_section.h1.a.stripped_strings[0]
+                        except Exception as e:
+                            car_data_dict["title"] = ''
+                            print(f"Error getting title: {e}")
 
-                    price = article.find("div", class_="ooa-2p9dfw efpuxbr4")
-                    price = price.text.replace("EUR", "").replace(" ","").strip() if price else "N/A"
+                        # Find the cilinder size and horse power
+                        try:
+                            cilinder_size_and_horse_power_string = car_title_section.p.string
+                            pattern = r"(?P<cylinder>\d{1,3}\s?\d{3})\s*cm3\s*•\s*(?P<horsepower>\d+)\s*cv"
+                            match = re.search(pattern, cilinder_size_and_horse_power_string)
+
+                            if match:
+                                car_data_dict["cilinder"] = match.group('cylinder').replace(' ', '')  # Removes any spaces within the cylinder size
+                                car_data_dict["hp"]       = match.group('horsepower')
+                        except Exception as e:
+                            car_data_dict["cilinder"] = ''
+                            car_data_dict["hp"] = ''
+                            print(f"Error getting title: {e}")
+
+                        car_info_section = article.find("div", class_=CLASS_DICT["car_info"]).dl
+
+                        kilometer = car_info_section.find("dd", {"data-parameter": "mileage"})
+                        kilometer = kilometer.string.replace(" km", "").replace(" ","") if kilometer else "1"
+
+                        gasType = article.find("dd", {"data-parameter": "fuel_type"})
+                        gasType = gasType.text if gasType else "N/A"
+
+                        gearBox = article.find("dd", {"data-parameter": "gearbox"})
+                        gearBox = gearBox.text if gearBox else "N/A"
+
+                        year = article.find("dd", {"data-parameter": "first_registration_year"})
+                        year = year.text if year else "N/A"
+
+                        price = article.find("div", class_="ooa-2p9dfw efpuxbr4")
+                        price = price.text.replace("EUR", "").replace(" ","").strip() if price else "N/A"
+
+                        return car_data_dict
+
+                    car_data_row = generate_car_data_dict(brand, article)
 
                     # Write data to CSV file immediately
-                    writer.writerow({
-                        "Brand": brand,
-                        "Title": title,
-                        "Kilometer": kilometer,
-                        "Gas Type": gasType,
-                        "Gear Box": gearBox,
-                        "Year": year,
-                        "Price": price
-                    })
+                    writer.writerow(car_data_row)
                 except Exception as e:
                     print(f"Error scraping a listing: {e}")
                     continue
