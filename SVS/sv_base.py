@@ -32,19 +32,33 @@ CLASS_DICT = {
     "num_cars" : "e17gkxda2 ooa-17owgto er34gjf0",
     "car_title": "ooa-1qo9a0p epwfahw6",
     "car_info": "ooa-d3dp2q epwfahw2",
+    "car_price_and_is_avg": "ooa-1a2gnf2 epwfahw5"
+}
 
-    "brand": "efpuxbr9 ooa-1ed90th er34gjf0",
-    "kilometer": {"data-parameter": "mileage"},
-    "gasType": {"data-parameter": "fuel_type"},
-    "gearBox": {"data-parameter": "gearbox"},
-    "year": {"data-parameter": "first_registration_year"},
-    "price": "ooa-2p9dfw efpuxbr4"
+# PT to EN
+translations = {
+    # Gearbox
+    'Automática'        : 'auto',
+    'Manual'            : 'manual',
+
+    # gas type
+    'Híbrido (Gasolina)': 'hyb_petrol',
+    'Híbrido (Diesel)'  : 'hyb_diesel',
+    'Eléctrico'         : 'electric',
+    'Gasolina'          : 'petrol',
+    'Diesel'            : 'diesel',
+
+    # sv average classification
+    'Abaixo da média'   : '1',
+    'Dentro da média'   : '2',
+    'Acima da média'    : '3',
 }
 
 # Open the CSV file in write mode to create it fresh
 with open(csvFile, mode='w', newline='', encoding='utf-8-sig') as file:
     # Create a CSV DictWriter object with the specified column order
-    writer = csv.DictWriter(file, fieldnames=["Brand", "Title", "Kilometer", "Gas Type", "Gear Box", "Year", "Price"])
+    #writer = csv.DictWriter(file, fieldnames=["Brand", "Title", "Kilometer", "Gas Type", "Gear Box", "Year", "Price"])
+    writer = csv.DictWriter(file, fieldnames=["brand", "title", "kilometer", "gas_type", "gear_box", "year", "price", "ad_link", "sv_avg_class", "hp", "cilinder"])
 
     # Write the header row
     writer.writeheader()
@@ -62,8 +76,12 @@ with open(csvFile, mode='w', newline='', encoding='utf-8-sig') as file:
     except Exception as e:
         print(f"No cookie consent prompt found or error clicking it: {e}")
 
+    # quick test for 1 brand only
+
     # Loop through each brand from the dictionary
-    for brand, slug in brand_urls.items():
+    #for brand, slug in brand_urls.items():
+    quick_test = { "Abarth": "abarth"} 
+    for brand, slug in quick_test.items():
         print(f"Scraping listings for {brand}...")
 
         # Base URL for pagination (start at page 1)
@@ -105,20 +123,24 @@ with open(csvFile, mode='w', newline='', encoding='utf-8-sig') as file:
 
                         # Find the ad title
                         try:
-                            car_data_dict["title"] = car_title_section.h1.a.stripped_strings[0]
+                            car_data_dict["title"] = car_title_section.p.a.string
                         except Exception as e:
                             car_data_dict["title"] = ''
                             print(f"Error getting title: {e}")
 
                         # Find the cilinder size and horse power
                         try:
-                            cilinder_size_and_horse_power_string = car_title_section.p.string
+                            cilinder_size_and_horse_power_string = car_title_section.find_all('p')[1].string
                             pattern = r"(?P<cylinder>\d{1,3}\s?\d{3})\s*cm3\s*•\s*(?P<horsepower>\d+)\s*cv"
                             match = re.search(pattern, cilinder_size_and_horse_power_string)
 
                             if match:
-                                car_data_dict["cilinder"] = match.group('cylinder').replace(' ', '')  # Removes any spaces within the cylinder size
+                                # motor cilinder
+                                car_data_dict["cilinder"] = match.group('cylinder').replace(' ', '')
+                                assert re.match(r"^\d+$", car_data_dict["cilinder"])
+                                # horse power
                                 car_data_dict["hp"]       = match.group('horsepower')
+                                assert re.match(r"^\d+$", car_data_dict["hp"])
                         except Exception as e:
                             car_data_dict["cilinder"] = ''
                             car_data_dict["hp"] = ''
@@ -126,20 +148,49 @@ with open(csvFile, mode='w', newline='', encoding='utf-8-sig') as file:
 
                         car_info_section = article.find("div", class_=CLASS_DICT["car_info"]).dl
 
+                        # ammount of kilometers
                         kilometer = car_info_section.find("dd", {"data-parameter": "mileage"})
-                        kilometer = kilometer.string.replace(" km", "").replace(" ","") if kilometer else "1"
+                        car_data_dict["kilometer"] = kilometer.text.replace(" km", "").replace(" ","") if kilometer else "1"
+                        assert re.match(r"^\d+$", car_data_dict["kilometer"])
 
+                        # gas type
                         gasType = article.find("dd", {"data-parameter": "fuel_type"})
-                        gasType = gasType.text if gasType else "N/A"
+                        _gas_type = gasType.text if gasType else "na"
+                        car_data_dict["gas_type"] = translations[_gas_type]
 
+                        # gear box
                         gearBox = article.find("dd", {"data-parameter": "gearbox"})
-                        gearBox = gearBox.text if gearBox else "N/A"
+                        _gearbox = gearBox.text if gearBox else "na"
+                        car_data_dict["gear_box"] = translations[_gearbox]
 
+                        # car year
                         year = article.find("dd", {"data-parameter": "first_registration_year"})
-                        year = year.text if year else "N/A"
+                        car_data_dict["year"] = year.text.replace(" ","").strip() if year else "na"
+                        assert re.match(r"^\d+$", car_data_dict["year"])
 
-                        price = article.find("div", class_="ooa-2p9dfw efpuxbr4")
-                        price = price.text.replace("EUR", "").replace(" ","").strip() if price else "N/A"
+                        car_price_and_is_avg_div = article.find("div", class_=CLASS_DICT["car_price_and_is_avg"])
+                        
+                        
+                        _divs = car_price_and_is_avg_div.find_all('div')
+
+                        # ad link:
+                        car_data_dict["ad_link"] = _divs[0].a['href']
+
+                        # price:
+                        _h3s = car_price_and_is_avg_div.find_all('h3')
+                        car_data_dict["price"] = _h3s[0].text.replace("EUR", "").replace(" ","")
+                        assert re.match(r"^\d+$", car_data_dict["price"])
+
+                        # car_data_dict["sv_avg_class"] = car_price_and_is_avg_div.find_all('div')[1] \
+                        #                             .find_all('div')[1].find_all('div')[0].p.text
+
+                        # Check if an SVG exists in this area. This tells us if standvirtual has classified this AD
+                        is_classified = len(car_price_and_is_avg_div.find_all('svg')) > 0
+                        car_data_dict["sv_avg_class"] = '0'
+                        if is_classified:
+                            _sv_classification = car_price_and_is_avg_div.find_all('p')[1].text
+                            car_data_dict["sv_avg_class"] = translations[_sv_classification]
+                        assert re.match(r"^\d$", car_data_dict["sv_avg_class"])
 
                         return car_data_dict
 
